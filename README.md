@@ -46,5 +46,5 @@ The new flags:
 ## Installation
 
 ```bash
-$ go install github.com/quasilyte/qbenchstat/cmd/qbenchstat
+$ go install github.com/msaf1980/qbenchstat/cmd/qbenchstat@latest
 ```

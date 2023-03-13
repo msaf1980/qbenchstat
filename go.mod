@@ -1,4 +1,4 @@
-module github.com/quasilyte/qbenchstat
+module github.com/msaf1980/qbenchstat
 
 go 1.18
 
