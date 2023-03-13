@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"math"
 	"os"
@@ -11,6 +12,72 @@ import (
 
 	"golang.org/x/perf/benchstat"
 )
+
+type StringSet map[string]struct{}
+
+func (u StringSet) Set(value string) error {
+	u[value] = struct{}{}
+	return nil
+}
+
+func (u StringSet) String() string {
+	if len(u) == 0 {
+		return "[]"
+	}
+	var buf strings.Builder
+	buf.Grow(len(u) * 10)
+	first := true
+	buf.WriteByte('[')
+	for t := range u {
+		if first {
+			first = false
+		} else {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(t)
+	}
+	buf.WriteByte(']')
+	return buf.String()
+}
+
+func (u *StringSet) Type() string {
+	return "[]string"
+}
+
+type Format int8
+
+const (
+	FormatText Format = iota
+	FormatCsv
+	FormatHtml
+	FormatMD
+)
+
+var formatStrings []string = []string{"text", "csv", "html", "markdown"}
+
+func (a *Format) Set(value string) error {
+	switch value {
+	case "text":
+		*a = FormatText
+	case "csv":
+		*a = FormatCsv
+	case "html":
+		*a = FormatHtml
+	case "md", "markdown":
+		*a = FormatMD
+	default:
+		return fmt.Errorf("invalid format %s", value)
+	}
+	return nil
+}
+
+func (a *Format) String() string {
+	return formatStrings[*a]
+}
+
+func (a *Format) Type() string {
+	return "format"
+}
 
 func main() {
 	log.SetFlags(0)
@@ -26,6 +93,15 @@ func runBenchstat() error {
 	flagSplit := flag.String("split", "pkg,goos,goarch", "split benchmarks by `labels`")
 	flagSort := flag.String("sort", "none", "sort by `order`: [-]delta, [-]name, none")
 	noColor := flag.Bool("no-color", false, "disable the colored output")
+	increasing := make(StringSet)
+	flag.Var(increasing, "increasing", "metrics where increasing is better")
+	var flagFormat Format
+	flag.Var(&flagFormat, "format", "print results in `format`:\n"+
+		"  text - plain text\n"+
+		"  csv  - comma-separated values\n"+
+		"  html  - html output"+
+		"  markdown | md - Markdown\n",
+	)
 	flag.Parse()
 
 	colorsEnabled := !*noColor
@@ -91,13 +167,23 @@ func runBenchstat() error {
 		f.Close()
 	}
 
+	var buf bytes.Buffer
 	tables := c.Tables()
 	fixBenchstatTables(tables)
-	if colorsEnabled {
-		colorizeBenchstatTables(tables)
+	if flagFormat == FormatText {
+		if colorsEnabled {
+			colorizeBenchstatTables(tables, increasing)
+		}
+		benchstat.FormatText(&buf, tables)
+	} else if flagFormat == FormatHtml {
+		FormatHTML(&buf, tables, colorsEnabled, increasing)
+	} else if flagFormat == FormatCsv {
+		benchstat.FormatCSV(&buf, tables, false)
+	} else if flagFormat == FormatMD {
+		FormatMarkdown(&buf, tables, colorsEnabled, increasing)
+	} else {
+		return fmt.Errorf("unsupported format %s", flagFormat.String())
 	}
-	var buf bytes.Buffer
-	benchstat.FormatText(&buf, tables)
 	os.Stdout.Write(buf.Bytes())
 
 	return nil
@@ -164,8 +250,9 @@ func isEpsilonDelta(metrics []*benchstat.Metrics) bool {
 	return math.Abs(metrics[0].Mean-metrics[1].Mean) <= eps
 }
 
-func colorizeBenchstatTables(tables []*benchstat.Table) {
+func colorizeBenchstatTables(tables []*benchstat.Table, increasing StringSet) {
 	for _, table := range tables {
+		_, isBiggerIsBetter := increasing[table.Metric]
 		for _, row := range table.Rows {
 			if isEpsilonDelta(row.Metrics) {
 				row.Delta = yellowColorize("~")
@@ -182,9 +269,17 @@ func colorizeBenchstatTables(tables []*benchstat.Table) {
 				continue
 			}
 			if strings.HasPrefix(row.Delta, "+") {
-				row.Delta = redColorize(row.Delta)
+				if isBiggerIsBetter {
+					row.Delta = greenColorize(row.Delta)
+				} else {
+					row.Delta = redColorize(row.Delta)
+				}
 			} else if strings.HasPrefix(row.Delta, "-") {
-				row.Delta = greenColorize(row.Delta)
+				if isBiggerIsBetter {
+					row.Delta = redColorize(row.Delta)
+				} else {
+					row.Delta = greenColorize(row.Delta)
+				}
 			} else {
 				row.Delta = yellowColorize(row.Delta)
 			}
