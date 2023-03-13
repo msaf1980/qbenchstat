@@ -93,6 +93,7 @@ func runBenchstat() error {
 	flagSplit := flag.String("split", "pkg,goos,goarch", "split benchmarks by `labels`")
 	flagSort := flag.String("sort", "none", "sort by `order`: [-]delta, [-]name, none")
 	noColor := flag.Bool("no-color", false, "disable the colored output")
+	failedThreshold := flag.Float64("threshold", 0, "failed threshold pcnt (0..100)")
 	increasing := make(StringSet)
 	flag.Var(increasing, "increasing", "metrics where increasing is better")
 	var flagFormat Format
@@ -136,6 +137,9 @@ func runBenchstat() error {
 	if !ok {
 		return errors.New("invalid sort argument")
 	}
+	if *failedThreshold < 0.0 || *failedThreshold > 100 {
+		return errors.New("invalid failed threshold argument")
+	}
 
 	if len(flag.Args()) == 0 {
 		// TODO: print command help here?
@@ -170,6 +174,9 @@ func runBenchstat() error {
 	var buf bytes.Buffer
 	tables := c.Tables()
 	fixBenchstatTables(tables)
+	if *failedThreshold > 0 {
+		tables = skipBenchstatTables(tables, *failedThreshold, increasing)
+	}
 	if flagFormat == FormatText {
 		if colorsEnabled {
 			colorizeBenchstatTables(tables, increasing)
@@ -323,4 +330,26 @@ func fixBenchstatTables(tables []*benchstat.Table) {
 		}
 		table.Rows = selectedRows
 	}
+}
+
+func skipBenchstatTables(tables []*benchstat.Table, failedThreshold float64, increasing StringSet) []*benchstat.Table {
+	newTables := make([]*benchstat.Table, 0, len(tables))
+	for _, table := range tables {
+		_, isBiggerIsBetter := increasing[table.Metric]
+		newTable := *table
+		newTable.Rows = newTable.Rows[:0]
+		for _, row := range table.Rows {
+			if isBiggerIsBetter {
+				if -row.PctDelta >= failedThreshold {
+					newTable.Rows = append(newTable.Rows, row)
+				}
+			} else if row.PctDelta >= failedThreshold {
+				newTable.Rows = append(newTable.Rows, row)
+			}
+		}
+		if len(newTable.Rows) > 0 {
+			newTables = append(newTables, &newTable)
+		}
+	}
+	return newTables
 }

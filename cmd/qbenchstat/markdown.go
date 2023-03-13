@@ -27,7 +27,7 @@ func FormatMarkdown(buf *bytes.Buffer, tables []*benchstat.Table, colorized bool
 		buf.WriteString(" |")
 	}
 	buf.WriteString(" |\n")
-	writeMDTableDelimiter(buf, len(tables[0].Configs)+2)
+	writeMDTableDelimiter(buf, len(tables[0].Configs)+3)
 
 	for _, table := range tables {
 		// metrics
